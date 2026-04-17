@@ -1,0 +1,37 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: harborclass_db
+    environment:
+      POSTGRES_USER: harbor
+      POSTGRES_PASSWORD: harbor
+      POSTGRES_DB: harborclass
+    ports:
+      - "5432:5432"
+    volumes:
+      - harborclass_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U harbor -d harborclass"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: harborclass_app
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      HARBORCLASS_HTTP_ADDR: ":8080"
+      HARBORCLASS_DB_URL: "postgres://harbor:harbor@db:5432/harborclass?sslmode=disable"
+      HARBORCLASS_MIGRATIONS: "/app/migrations.sql"
+      HARBORCLASS_SEED: "true"
+      HARBORCLASS_ENCRYPTION_KEY: "dev-only-encryption-key-change-me-32"
+    ports:
+      - "8080:8080"
+
+volumes:
+  harborclass_pgdata:

@@ -1,0 +1,11 @@
+.git
+.gitignore
+.claude
+.vscode
+.idea
+*.md
+docs
+metadata.json
+questions.md
+run_tests.sh
+README.md

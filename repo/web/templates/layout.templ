@@ -1,0 +1,17 @@
+// HarborClass — shared layout (templ source). Compiled twin lives in
+// webtpl/webtpl.go so tests can render without running the templ CLI.
+package templates
+
+templ Layout(title string, body templ.Component) {
+	<!DOCTYPE html>
+	<html lang="en">
+		<head>
+			<meta charset="utf-8"/>
+			<title>{ title }</title>
+			<link rel="stylesheet" href="/static/harbor.css"/>
+		</head>
+		<body>
+			@body
+		</body>
+	</html>
+}

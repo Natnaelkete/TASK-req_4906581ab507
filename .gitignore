@@ -1,0 +1,27 @@
+# OS files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Editor settings
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+
+# Local env and secrets
+.env
+.env.*
+*.pem
+*.key
+*.crt
+
+# Dependency and cache folders
+node_modules/
+.tmp/
+tmp/
+.cache/
+coverage/

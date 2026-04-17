@@ -1,0 +1,53 @@
+// Student dashboard (templ source for webtpl.RenderStudentDashboard).
+package templates
+
+import "github.com/eaglepoint/harborclass/internal/models"
+
+templ StudentDashboard(user models.User, orders []models.Order) {
+	<header class="topbar" data-role="student">
+		<h1>Student Dashboard</h1>
+		<p>Welcome, { user.DisplayName }</p>
+	</header>
+	<nav aria-label="student-nav">
+		<a href="/api/sessions">Browse sessions</a>
+		|
+		<a href="/api/my/orders">My orders</a>
+		|
+		<a href="/api/my/subscriptions">Message preferences</a>
+	</nav>
+	<section aria-label="orders">
+		<h2>Your order timeline</h2>
+		<ul class="orders">
+			if len(orders) == 0 {
+				<li class="empty">No orders yet — create a booking to get started.</li>
+			}
+			for _, o := range orders {
+				<li data-order-id={ o.ID }>
+					<span class="order-number">{ o.Number }</span>
+					<span class={ "state-badge state-" + string(o.State) }>{ string(o.State) }</span>
+					<span class="payment">{ string(o.Payment) }</span>
+					<ol class="timeline">
+						for _, ev := range o.Timeline {
+							<li>
+								<time>{ ev.At.Format("2006-01-02 15:04") }</time>
+								<span class="badge">{ string(ev.State) }</span>
+								{ ev.Message }
+							</li>
+						}
+					</ol>
+					<div class="actions">
+						<form method="post" action={ templ.URL("/api/bookings/" + o.ID + "/reschedule") }>
+							<button>Request reschedule</button>
+						</form>
+						<form method="post" action={ templ.URL("/api/bookings/" + o.ID + "/cancel") }>
+							<button>Cancel</button>
+						</form>
+						<form method="post" action={ templ.URL("/api/bookings/" + o.ID + "/refund-request") }>
+							<button>Request refund</button>
+						</form>
+					</div>
+				</li>
+			}
+		</ul>
+	</section>
+}

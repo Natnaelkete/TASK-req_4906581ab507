@@ -1,0 +1,47 @@
+// Teacher console (templ source for webtpl.RenderTeacherDashboard).
+package templates
+
+import "github.com/eaglepoint/harborclass/internal/models"
+
+type Window struct {
+	Views     int
+	Likes     int
+	Favorites int
+	Followers int
+}
+
+templ TeacherDashboard(user models.User, w7, w30, w90 Window) {
+	<header class="topbar" data-role="teacher">
+		<h1>Teacher Console</h1>
+		<p>Signed in as { user.DisplayName }</p>
+	</header>
+	<section aria-label="profile">
+		<h2>Creator profile</h2>
+		<button class="pin-btn">Pin featured work</button>
+		<form method="post" action="/api/teacher/content/bulk" class="bulk-actions">
+			<button name="action" value="edit">Bulk edit</button>
+			<button name="action" value="unpublish">Unpublish</button>
+			<button name="action" value="delete">Delete</button>
+		</form>
+	</section>
+	<section aria-label="analytics">
+		<h2>Analytics</h2>
+		@AnalyticsWindow("7 days", w7)
+		@AnalyticsWindow("30 days", w30)
+		@AnalyticsWindow("90 days", w90)
+	</section>
+}
+
+templ AnalyticsWindow(label string, w Window) {
+	<article class="window" data-window={ label }>
+		<h3>{ label }</h3>
+		<dl>
+			<dt>Views</dt>
+			<dd data-metric="views">{ fmt.Sprintf("%d", w.Views) }</dd>
+			<dt>Likes+Favorites</dt>
+			<dd data-metric="engagement">{ fmt.Sprintf("%d", w.Likes + w.Favorites) }</dd>
+			<dt>Followers</dt>
+			<dd data-metric="followers">{ fmt.Sprintf("%d", w.Followers) }</dd>
+		</dl>
+	</article>
+}

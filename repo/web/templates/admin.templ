@@ -1,0 +1,46 @@
+// Admin console (templ source for webtpl.RenderAdminDashboard).
+package templates
+
+import "github.com/eaglepoint/harborclass/internal/models"
+
+templ AdminDashboard(user models.User) {
+	<header class="topbar" data-role="admin">
+		<h1>Administrator Console</h1>
+		<p>{ user.DisplayName }</p>
+	</header>
+	<nav>
+		<a href="/api/admin/membership">Membership</a> ·
+		<a href="/api/admin/permissions">Permissions</a> ·
+		<a href="/api/admin/facilities">Facilities</a> ·
+		<a href="/api/audit-logs">Audit</a> ·
+		<a href="/api/audit-logs/export">Export CSV</a> ·
+		<a href="/api/alerts">Alerts</a> ·
+		<a href="/api/devices/policy">Device policies</a>
+	</nav>
+	<section>
+		<h2>Offline alerts</h2>
+		<ul class="alerts"><li class="empty">All systems nominal.</li></ul>
+	</section>
+}
+
+templ Home() {
+	<header class="topbar"><h1>HarborClass</h1>
+		<nav>
+			<a href="/student">Student</a>
+			<a href="/teacher">Teacher</a>
+			<a href="/dispatcher">Dispatcher</a>
+			<a href="/admin">Admin</a>
+		</nav>
+	</header>
+	<main>
+		<section>
+			<h2>Welcome</h2>
+			<p>Booking &amp; Dispatch for education and training organizations.</p>
+			<form id="login" method="post" action="/api/auth/login">
+				<label>Username <input name="username"/></label>
+				<label>Password <input name="password" type="password"/></label>
+				<button type="submit">Sign in</button>
+			</form>
+		</section>
+	</main>
+}

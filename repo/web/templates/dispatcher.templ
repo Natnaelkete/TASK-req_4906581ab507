@@ -1,0 +1,58 @@
+// Dispatcher console (templ source for webtpl.RenderDispatcherDashboard).
+package templates
+
+import "github.com/eaglepoint/harborclass/internal/models"
+
+templ DispatcherDashboard(user models.User, couriers []models.User, deliveries []models.Order, conflicts []string) {
+	<header class="topbar" data-role="dispatcher">
+		<h1>Dispatcher Console</h1>
+		<p>{ user.DisplayName }</p>
+	</header>
+	<section aria-label="strategy">
+		<h2>Assignment strategy</h2>
+		<form method="post" action="/api/deliveries/assign">
+			<select name="strategy">
+				<option value="distance-first">distance-first</option>
+				<option value="rating-first">rating-first</option>
+				<option value="load-balanced">load-balanced</option>
+			</select>
+			<button>Assign</button>
+		</form>
+	</section>
+	<section aria-label="deliveries">
+		<h2>Delivery queue</h2>
+		<table>
+			<thead><tr><th>Order</th><th>Zone</th><th>Pickup</th><th>State</th></tr></thead>
+			<tbody>
+				for _, o := range deliveries {
+					<tr>
+						<td>{ o.Number }</td>
+						<td>{ o.PickupZone }</td>
+						<td>{ o.PickupAt.Format("2006-01-02 15:04") }</td>
+						<td><span class={ "state-badge state-" + string(o.State) }>{ string(o.State) }</span></td>
+					</tr>
+				}
+			</tbody>
+		</table>
+	</section>
+	<section aria-label="couriers">
+		<h2>Couriers</h2>
+		<ul>
+			for _, c := range couriers {
+				<li data-courier-id={ c.ID }>{ c.DisplayName } — rating { fmt.Sprintf("%.1f", c.Rating) }, load { fmt.Sprintf("%d", c.Load) }</li>
+			}
+		</ul>
+	</section>
+	if len(conflicts) > 0 {
+		<section class="conflicts" aria-label="conflicts">
+			<h2>Conflicts</h2>
+			<ul>
+				for _, n := range conflicts {
+					<li class="conflict-msg">{ n }</li>
+				}
+			</ul>
+		</section>
+	} else {
+		<section class="conflicts empty"><p>No conflicts detected.</p></section>
+	}
+}
