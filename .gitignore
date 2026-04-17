@@ -26,5 +26,6 @@ tmp/
 .cache/
 coverage/
 
+.claude
 .claude/
 claude/
