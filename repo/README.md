@@ -55,15 +55,17 @@ boot - controlled by the `HARBORCLASS_SEED` environment variable.
 
 ## Tests
 
-Run the full test suite inside the container image used for the app,
-so the test run matches the shipped runtime byte-for-byte:
+Run the full test suite:
 
 ```bash
-docker-compose run --rm app ./run_tests.sh
+./run_tests.sh
 ```
 
-`run_tests.sh` executes `go test ./...` against the Go toolchain baked
-into the image. The suite covers:
+`run_tests.sh` wraps `go test -count=1 ./...`. The suite does not need
+the `docker-compose up` stack running - the HTTP integration tests
+drive the real router against the in-memory store implementation of
+the `store.Store` interface (not a mock), and the unit tests exercise
+domain packages directly. It covers:
 
 - Backend unit tests for the state machine, dispatch strategies,
   notification engine, audit hash chain, and scope/crypto helpers.

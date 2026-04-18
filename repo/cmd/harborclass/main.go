@@ -28,17 +28,24 @@ import (
 func main() {
 	gin.SetMode(gin.ReleaseMode)
 	cfg := config.Load()
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer cancel()
+	// The SIGTERM-aware context drives graceful shutdown of the HTTP
+	// server only. Startup I/O (DB connect, migration apply, seeding)
+	// runs against its own background context so a SIGTERM arriving
+	// during boot — common under docker-compose down / CI stop — does
+	// not abort a half-applied migration with "canceling statement due
+	// to user request" errors mid-flight.
+	runCtx, cancelRun := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancelRun()
+
+	bootCtx, cancelBoot := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancelBoot()
 
 	var s store.Store
-	pg, err := store.OpenPostgres(ctx, cfg.DatabaseURL, cfg.MigrationsPath)
+	pg, err := store.OpenPostgres(bootCtx, cfg.DatabaseURL, cfg.MigrationsPath)
 	if err != nil {
 		// Production deployments (HARBORCLASS_REQUIRE_DB=true — the default
-		// under `docker compose up`) treat a missing Postgres as a hard
+		// under `docker-compose up`) treat a missing Postgres as a hard
 		// failure so the documented runtime contract is honoured.
-		// Developers running without compose can set the flag to false to
-		// fall back to the in-memory store for quick local iteration.
 		if cfg.RequireDatabase {
 			log.Fatalf("postgres unavailable and HARBORCLASS_REQUIRE_DB=true: %v", err)
 		}
@@ -49,7 +56,7 @@ func main() {
 	}
 
 	if cfg.SeedDemoData {
-		if err := bootstrap.Seed(ctx, s, cfg); err != nil {
+		if err := bootstrap.Seed(bootCtx, s, cfg); err != nil {
 			log.Printf("seed warning: %v", err)
 		}
 	}
@@ -87,7 +94,7 @@ func main() {
 		}
 	}()
 
-	<-ctx.Done()
+	<-runCtx.Done()
 	shutdown, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer shutdownCancel()
 	_ = srv.Shutdown(shutdown)
