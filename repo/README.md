@@ -61,11 +61,12 @@ Run the full test suite:
 ./run_tests.sh
 ```
 
-`run_tests.sh` wraps `go test -count=1 ./...`. The suite does not need
-the `docker-compose up` stack running - the HTTP integration tests
-drive the real router against the in-memory store implementation of
-the `store.Store` interface (not a mock), and the unit tests exercise
-domain packages directly. It covers:
+`run_tests.sh` is Docker-only. It builds the `tests` stage of the
+bundled Dockerfile - which resolves every module from the committed
+`go.sum` during `docker build` (no `go mod tidy`, no runtime install
+path) - and then runs `go test -count=1 ./...` inside a container
+with `--network none` so the tests run fully offline. No host Go
+toolchain, package manager, or database setup is required. It covers:
 
 - Backend unit tests for the state machine, dispatch strategies,
   notification engine, audit hash chain, and scope/crypto helpers.

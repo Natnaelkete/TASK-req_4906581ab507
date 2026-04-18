@@ -1,18 +1,23 @@
 # syntax=docker/dockerfile:1
 
-FROM golang:1.22-alpine AS build
+FROM golang:1.22-alpine AS deps
 WORKDIR /src
 
-# Copy source
+# Dependencies resolve from the committed go.mod + go.sum so Docker
+# never runs `go mod tidy` at build time. This prevents any runtime
+# install path from sneaking into the image or into test execution.
+COPY go.mod go.sum ./
+RUN go mod download
+
+FROM deps AS build
 COPY . .
-
-# Resolve and vendor dependencies on the fly. Using -mod=mod lets us
-# bootstrap go.sum inside the container so the repo ships lean while
-# Docker produces a reproducible image.
-ENV GOFLAGS=-mod=mod
-RUN go mod tidy
-
 RUN CGO_ENABLED=0 GOOS=linux go build -o /out/harborclass ./cmd/harborclass
+
+# Dedicated test stage - baked into the image so ./run_tests.sh can run
+# the full suite inside Docker without any host toolchain or installs.
+FROM deps AS tests
+COPY . .
+CMD ["go", "test", "-count=1", "./..."]
 
 FROM alpine:3.20
 RUN apk add --no-cache ca-certificates tzdata
