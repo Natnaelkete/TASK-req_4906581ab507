@@ -6,9 +6,9 @@ Frontend: Go Templ (server-rendered HTML)
 
 HarborClass is a multi-role booking and dispatch platform for education
 and training organisations that run in-person sessions. It implements
-the full HarborClass business brief — multi-role scheduling, creator
+the full HarborClass business brief - multi-role scheduling, creator
 content management, delivery dispatch, an offline notification centre,
-tamper-evident auditing, and device/upgrade policies — without any
+tamper-evident auditing, and device/upgrade policies - without any
 third-party service dependencies at runtime.
 
 ## Stack and architecture
@@ -20,18 +20,18 @@ third-party service dependencies at runtime.
 - **Persistence boundary:** one `store.Store` interface with both a
   PostgreSQL and an in-memory implementation (the in-memory store is a
   real implementation, not a mock, and is used by integration tests).
-- **State machine:** `internal/order` — shared between bookings and
+- **State machine:** `internal/order` - shared between bookings and
   deliveries, enforces reschedule caps, 24h approval window, 7-day
   refund window, and rollback.
-- **Dispatch:** `internal/dispatch` — distance-first, rating-first, and
+- **Dispatch:** `internal/dispatch` - distance-first, rating-first, and
   load-balanced strategies with facility cutoff, blacklisted zones,
   zone-blacklisted couriers, and double-booking detection.
-- **Notifications:** `internal/notify` — reminder cap of 3 per order
+- **Notifications:** `internal/notify` - reminder cap of 3 per order
   per day, 5 retries with exponential backoff, unsubscribe flag
   enforcement, delivery attempts written to an audit table.
-- **Audit:** `internal/audit` — tamper-evident hash chain with search
+- **Audit:** `internal/audit` - tamper-evident hash chain with search
   and CSV export. Admin UI reads and exports via this package.
-- **Authentication & authorisation:** `internal/auth` — salted password
+- **Authentication & authorisation:** `internal/auth` - salted password
   hashing, AES-GCM PII encryption, masked views, role/org/class scope
   checks.
 
@@ -41,7 +41,7 @@ The only supported runtime is Docker Compose. The bundled
 `docker-compose.yml` provisions the application and PostgreSQL.
 
 ```bash
-docker compose up
+docker-compose up
 ```
 
 After the `db` service is healthy, the API becomes available at:
@@ -51,21 +51,26 @@ Web UI: http://localhost:8080/
 
 Seed data (demo org, class, one session, five role accounts, and the
 default notification templates) is installed deterministically on first
-boot — controlled by the `HARBORCLASS_SEED` environment variable.
+boot - controlled by the `HARBORCLASS_SEED` environment variable.
 
 ## Tests
 
+Run the full test suite inside the container image used for the app,
+so the test run matches the shipped runtime byte-for-byte:
+
 ```bash
-./run_tests.sh
+docker-compose run --rm app ./run_tests.sh
 ```
 
-`run_tests.sh` executes `go test ./...`. The suite covers:
+`run_tests.sh` executes `go test ./...` against the Go toolchain baked
+into the image. The suite covers:
 
 - Backend unit tests for the state machine, dispatch strategies,
   notification engine, audit hash chain, and scope/crypto helpers.
 - Real HTTP integration tests (no mocked handlers, services, or
-  repositories) across bookings, deliveries, notifications, audit, and
-  health endpoint groups.
+  repositories) across auth, bookings, deliveries, notifications,
+  audit, admin, teacher console, devices, ops, and the server-rendered
+  role pages.
 - Templ rendering tests for the Student, Teacher, Dispatcher, and
   Admin dashboards.
 
@@ -83,15 +88,23 @@ These accounts are created at startup by `internal/bootstrap.Seed`.
 
 ## Minimal verification scenario
 
-1. `docker compose up` — start the stack.
-2. `POST /api/auth/login` with `student` / `student-pass` → receive
-   bearer token.
-3. `GET /api/sessions` → see seeded session `sess-demo-1`.
-4. `POST /api/bookings` with `{"session_id":"sess-demo-1"}` → order is
-   created and auto-confirmed with a `HC-MMDDYYYY-NNNNNN` number and a
-   visible `state` badge (`confirmed`).
-5. Visit `http://localhost:8080/student` — the server-rendered dashboard
-   displays the order timeline and state badge.
+1. `docker-compose up` - start the stack.
+2. `curl -s -X POST http://localhost:8080/api/auth/login \
+   -H 'Content-Type: application/json' \
+   -d '{"username":"student","password":"student-pass"}'`
+   returns a bearer token.
+3. `curl -s http://localhost:8080/api/sessions \
+   -H "Authorization: Bearer $TOKEN"` lists the seeded session
+   `sess-demo-1`.
+4. `curl -s -X POST http://localhost:8080/api/bookings \
+   -H 'Content-Type: application/json' \
+   -H "Authorization: Bearer $TOKEN" \
+   -d '{"session_id":"sess-demo-1"}'` creates an auto-confirmed order
+   with a `HC-MMDDYYYY-NNNNNN` number and a visible `state` badge
+   (`confirmed`).
+5. Visit `http://localhost:8080/student` in a browser - the
+   server-rendered dashboard displays the order timeline and state
+   badge.
 6. Log in as `dispatcher` and `POST /api/deliveries/:id/assign` with
    `{"strategy":"rating-first"}` to assign a courier; try a
    blacklisted zone to see the UI conflict message.
@@ -101,16 +114,20 @@ These accounts are created at startup by `internal/bootstrap.Seed`.
 Full API inventory is in `docs/api-spec.md` and mirrored in
 `internal/http/router.go`. The major groups are:
 
-- `/api/auth/*` — login/logout/whoami
-- `/api/sessions`, `/api/bookings/*`, `/api/my/*` — student/teacher flows
-- `/api/deliveries/*` — dispatch and courier assignment
-- `/api/notifications/*` — notification centre
-- `/api/audit-logs`, `/api/audit-logs/export` — admin audit
-- `/api/admin/*` — org/class membership, permissions, rollback
-- `/api/devices/*` — device registration and upgrade policies
-- `/api/health`, `/api/metrics`, `/api/alerts`, `/api/crash-reports` — ops
+- `/api/auth/*` - login/logout/whoami
+- `/api/sessions`, `/api/bookings/*`, `/api/my/*` - student/teacher flows
+- `/api/deliveries/*` - dispatch and courier assignment (with
+  per-order completion)
+- `/api/notifications/*` - notification centre
+- `/api/audit-logs`, `/api/audit-logs/export` - admin audit
+- `/api/admin/*` - org/class membership, permissions, rollback
+- `/api/devices/*` - device registration and upgrade policies
+- `/api/health`, `/api/metrics`, `/api/alerts`, `/api/crash-reports` - ops
 
 ## Environment variables
+
+Every environment variable below is wired in `docker-compose.yml`; the
+defaults shown are the values used by the supported Docker runtime.
 
 | Variable                          | Default                                                                           |
 |-----------------------------------|-----------------------------------------------------------------------------------|
@@ -123,6 +140,7 @@ Full API inventory is in `docs/api-spec.md` and mirrored in
 | `HARBORCLASS_RETRY_MAX`           | `5`                                                                               |
 | `HARBORCLASS_RETRY_BASE_MS`       | `500`                                                                             |
 | `HARBORCLASS_PICKUP_CUTOFF_HOUR`  | `20`                                                                              |
+| `HARBORCLASS_REQUIRE_DB`          | `true` - missing Postgres is a fatal startup error under Docker Compose.          |
 
 ## Project layout
 
@@ -147,5 +165,5 @@ docs/api-spec.md               # full endpoint inventory
 questions.md                   # assumptions and applied answers
 metadata.json                  # project metadata (incl. full prompt)
 Dockerfile, docker-compose.yml # container runtime
-run_tests.sh                   # go test ./...
+run_tests.sh                   # go test ./... inside the app image
 ```

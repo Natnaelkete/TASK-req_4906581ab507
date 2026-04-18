@@ -6,12 +6,16 @@ package auth
 import (
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
+	"strconv"
+	"strings"
+	"time"
 )
 
 // DeriveKey produces a stable 32-byte key from an arbitrary-length
@@ -105,6 +109,58 @@ func DecryptPII(key []byte, encoded string) (string, error) {
 		return "", err
 	}
 	return string(pt), nil
+}
+
+// UnsubscribeTokenTTL is the validity window of a signed one-click
+// unsubscribe link.
+const UnsubscribeTokenTTL = 30 * 24 * time.Hour // 30 days
+
+// SignUnsubscribe returns a URL-safe signed token proving the holder
+// is authorised to unsubscribe user+category. Tokens encode their
+// expiry and are verified with HMAC-SHA256.
+func SignUnsubscribe(key []byte, user, category string, now time.Time) string {
+	expiry := now.Add(UnsubscribeTokenTTL).Unix()
+	payload := unsubPayload(user, category, expiry)
+	mac := hmacDigest(key, payload)
+	return strconv.FormatInt(expiry, 10) + "." + base64.RawURLEncoding.EncodeToString(mac)
+}
+
+// VerifyUnsubscribe returns nil when token proves the authorization to
+// unsubscribe the given user+category and has not expired.
+func VerifyUnsubscribe(key []byte, user, category, token string, now time.Time) error {
+	if token == "" {
+		return errors.New("missing unsubscribe token")
+	}
+	dot := strings.IndexByte(token, '.')
+	if dot <= 0 || dot == len(token)-1 {
+		return errors.New("malformed unsubscribe token")
+	}
+	expiry, err := strconv.ParseInt(token[:dot], 10, 64)
+	if err != nil {
+		return errors.New("malformed unsubscribe token")
+	}
+	if now.Unix() > expiry {
+		return errors.New("unsubscribe token expired")
+	}
+	given, err := base64.RawURLEncoding.DecodeString(token[dot+1:])
+	if err != nil {
+		return errors.New("malformed unsubscribe token")
+	}
+	want := hmacDigest(key, unsubPayload(user, category, expiry))
+	if !hmac.Equal(given, want) {
+		return errors.New("invalid unsubscribe signature")
+	}
+	return nil
+}
+
+func unsubPayload(user, category string, expiry int64) []byte {
+	return []byte(user + "|" + category + "|" + strconv.FormatInt(expiry, 10))
+}
+
+func hmacDigest(key, msg []byte) []byte {
+	h := hmac.New(sha256.New, key)
+	h.Write(msg)
+	return h.Sum(nil)
 }
 
 // MaskPhone returns a display-safe masked phone number, preserving only

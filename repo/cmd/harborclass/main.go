@@ -34,6 +34,14 @@ func main() {
 	var s store.Store
 	pg, err := store.OpenPostgres(ctx, cfg.DatabaseURL, cfg.MigrationsPath)
 	if err != nil {
+		// Production deployments (HARBORCLASS_REQUIRE_DB=true — the default
+		// under `docker compose up`) treat a missing Postgres as a hard
+		// failure so the documented runtime contract is honoured.
+		// Developers running without compose can set the flag to false to
+		// fall back to the in-memory store for quick local iteration.
+		if cfg.RequireDatabase {
+			log.Fatalf("postgres unavailable and HARBORCLASS_REQUIRE_DB=true: %v", err)
+		}
 		log.Printf("postgres unavailable, falling back to in-memory store: %v", err)
 		s = store.NewMemory()
 	} else {

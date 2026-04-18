@@ -74,19 +74,29 @@ func (p *Postgres) exec(ctx context.Context, q string, args ...any) error {
 }
 
 // CreateUser inserts a user row and returns ErrConflict on duplicate.
+// Using ON CONFLICT DO NOTHING keeps the insert idempotent, but we
+// inspect rows-affected to surface the conflict explicitly so the
+// Store contract (ErrConflict for duplicate username) is honoured.
 func (p *Postgres) CreateUser(ctx context.Context, u models.User) error {
-	return p.exec(ctx,
-		`INSERT INTO users(id, username, role, org_id, password_hash, phone_cipher, display_name, rating, load_count, lat, lng, created_at)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+	res, err := p.db.ExecContext(ctx,
+		`INSERT INTO users(id, username, role, org_id, class_ids, password_hash, phone_cipher, display_name, rating, load_count, lat, lng, created_at)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
 		 ON CONFLICT (username) DO NOTHING`,
-		u.ID, u.Username, string(u.Role), u.OrgID, u.PasswordHash, u.PhoneCipher, u.DisplayName, u.Rating, u.Load, u.Location.Lat, u.Location.Lng, u.CreatedAt,
+		u.ID, u.Username, string(u.Role), u.OrgID, joinStrings(u.ClassIDs), u.PasswordHash, u.PhoneCipher, u.DisplayName, u.Rating, u.Load, u.Location.Lat, u.Location.Lng, u.CreatedAt,
 	)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrConflict
+	}
+	return nil
 }
 
 // UserByUsername fetches a user by its unique username.
 func (p *Postgres) UserByUsername(ctx context.Context, username string) (models.User, error) {
 	row := p.db.QueryRowContext(ctx,
-		`SELECT id, username, role, org_id, password_hash, phone_cipher, display_name, rating, load_count, lat, lng, created_at
+		`SELECT id, username, role, org_id, class_ids, password_hash, phone_cipher, display_name, rating, load_count, lat, lng, created_at
 		 FROM users WHERE username=$1`, username)
 	return scanUser(row)
 }
@@ -94,7 +104,7 @@ func (p *Postgres) UserByUsername(ctx context.Context, username string) (models.
 // UserByID fetches a user by primary key id.
 func (p *Postgres) UserByID(ctx context.Context, id string) (models.User, error) {
 	row := p.db.QueryRowContext(ctx,
-		`SELECT id, username, role, org_id, password_hash, phone_cipher, display_name, rating, load_count, lat, lng, created_at
+		`SELECT id, username, role, org_id, class_ids, password_hash, phone_cipher, display_name, rating, load_count, lat, lng, created_at
 		 FROM users WHERE id=$1`, id)
 	return scanUser(row)
 }
@@ -102,7 +112,7 @@ func (p *Postgres) UserByID(ctx context.Context, id string) (models.User, error)
 // ListUsersByRole enumerates all users matching a role.
 func (p *Postgres) ListUsersByRole(ctx context.Context, role models.Role) ([]models.User, error) {
 	rows, err := p.db.QueryContext(ctx,
-		`SELECT id, username, role, org_id, password_hash, phone_cipher, display_name, rating, load_count, lat, lng, created_at
+		`SELECT id, username, role, org_id, class_ids, password_hash, phone_cipher, display_name, rating, load_count, lat, lng, created_at
 		 FROM users WHERE role=$1 ORDER BY username`, string(role))
 	if err != nil {
 		return nil, err
@@ -119,12 +129,22 @@ func (p *Postgres) ListUsersByRole(ctx context.Context, role models.Role) ([]mod
 	return out, rows.Err()
 }
 
-// UpdateUser writes back mutable user fields.
+// UpdateUser writes back mutable user fields — including class
+// membership so admin.Membership changes survive in PostgreSQL. An
+// UPDATE that affected no rows means the target user has gone away,
+// which we surface as ErrNotFound to honour the Store contract.
 func (p *Postgres) UpdateUser(ctx context.Context, u models.User) error {
-	return p.exec(ctx,
-		`UPDATE users SET role=$2, rating=$3, load_count=$4, display_name=$5 WHERE id=$1`,
-		u.ID, string(u.Role), u.Rating, u.Load, u.DisplayName,
+	res, err := p.db.ExecContext(ctx,
+		`UPDATE users SET role=$2, rating=$3, load_count=$4, display_name=$5, class_ids=$6 WHERE id=$1`,
+		u.ID, string(u.Role), u.Rating, u.Load, u.DisplayName, joinStrings(u.ClassIDs),
 	)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // UpsertFacility inserts or updates a facility row.
@@ -156,16 +176,16 @@ func (p *Postgres) FacilityByID(ctx context.Context, id string) (models.Facility
 // CreateSession stores a bookable session.
 func (p *Postgres) CreateSession(ctx context.Context, s models.Session) error {
 	return p.exec(ctx,
-		`INSERT INTO sessions(id, teacher_id, class_id, title, starts_at, ends_at, capacity, booked_size, lat, lng)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
-		s.ID, s.TeacherID, s.ClassID, s.Title, s.StartsAt, s.EndsAt, s.Capacity, s.BookedSize, s.Location.Lat, s.Location.Lng,
+		`INSERT INTO sessions(id, teacher_id, class_id, org_id, title, starts_at, ends_at, capacity, booked_size, lat, lng)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+		s.ID, s.TeacherID, s.ClassID, s.OrgID, s.Title, s.StartsAt, s.EndsAt, s.Capacity, s.BookedSize, s.Location.Lat, s.Location.Lng,
 	)
 }
 
 // ListSessions returns all sessions ordered by start.
 func (p *Postgres) ListSessions(ctx context.Context) ([]models.Session, error) {
 	rows, err := p.db.QueryContext(ctx,
-		`SELECT id, teacher_id, class_id, title, starts_at, ends_at, capacity, booked_size, lat, lng
+		`SELECT id, teacher_id, class_id, org_id, title, starts_at, ends_at, capacity, booked_size, lat, lng
 		 FROM sessions ORDER BY starts_at ASC`)
 	if err != nil {
 		return nil, err
@@ -185,7 +205,7 @@ func (p *Postgres) ListSessions(ctx context.Context) ([]models.Session, error) {
 // SessionByID fetches a session.
 func (p *Postgres) SessionByID(ctx context.Context, id string) (models.Session, error) {
 	row := p.db.QueryRowContext(ctx,
-		`SELECT id, teacher_id, class_id, title, starts_at, ends_at, capacity, booked_size, lat, lng
+		`SELECT id, teacher_id, class_id, org_id, title, starts_at, ends_at, capacity, booked_size, lat, lng
 		 FROM sessions WHERE id=$1`, id)
 	return scanSession(row)
 }
@@ -205,31 +225,86 @@ func (p *Postgres) IncrementSessionBookings(ctx context.Context, id string, delt
 	return nil
 }
 
-// CreateOrder inserts a new order row.
+// CreateOrder inserts a new order row and persists every timeline
+// event the state machine has produced so far.
 func (p *Postgres) CreateOrder(ctx context.Context, o models.Order) error {
-	return p.exec(ctx,
+	if err := p.exec(ctx,
 		`INSERT INTO orders(id, number, kind, state, payment, student_id, teacher_id, session_id, courier_id, pickup_zone, pickup_at, org_id, class_id, created_at, completed_at, reschedule_count)
 		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
 		o.ID, o.Number, string(o.Kind), string(o.State), string(o.Payment), o.StudentID, o.TeacherID, o.SessionID, o.CourierID, o.PickupZone, o.PickupAt, o.OrgID, o.ClassID, o.CreatedAt, o.CompletedAt, o.RescheduleCount,
-	)
+	); err != nil {
+		return err
+	}
+	return p.replaceOrderEvents(ctx, o.ID, o.Timeline)
 }
 
-// UpdateOrder updates a mutable order row.
+// UpdateOrder updates a mutable order row and re-syncs the timeline so
+// newly-appended events are persisted alongside the state change.
 func (p *Postgres) UpdateOrder(ctx context.Context, o models.Order) error {
-	return p.exec(ctx,
+	if err := p.exec(ctx,
 		`UPDATE orders SET state=$2, payment=$3, courier_id=$4, pickup_zone=$5, pickup_at=$6, completed_at=$7, reschedule_count=$8 WHERE id=$1`,
 		o.ID, string(o.State), string(o.Payment), o.CourierID, o.PickupZone, o.PickupAt, o.CompletedAt, o.RescheduleCount,
-	)
+	); err != nil {
+		return err
+	}
+	return p.replaceOrderEvents(ctx, o.ID, o.Timeline)
 }
 
-// OrderByID fetches an order.
+// replaceOrderEvents overwrites the persisted timeline for an order so
+// the SQL history stays aligned with the Order.Timeline value carried
+// by the state machine.
+func (p *Postgres) replaceOrderEvents(ctx context.Context, orderID string, events []models.OrderEvent) error {
+	if _, err := p.db.ExecContext(ctx, `DELETE FROM order_events WHERE order_id=$1`, orderID); err != nil {
+		return err
+	}
+	for i, ev := range events {
+		if _, err := p.db.ExecContext(ctx,
+			`INSERT INTO order_events(order_id, seq, at, state, actor, message) VALUES ($1,$2,$3,$4,$5,$6)`,
+			orderID, i, ev.At, string(ev.State), ev.Actor, ev.Message,
+		); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// loadOrderEvents returns the persisted timeline for an order in the
+// order the state machine appended it.
+func (p *Postgres) loadOrderEvents(ctx context.Context, orderID string) ([]models.OrderEvent, error) {
+	rows, err := p.db.QueryContext(ctx,
+		`SELECT at, state, actor, message FROM order_events WHERE order_id=$1 ORDER BY seq ASC`, orderID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []models.OrderEvent{}
+	for rows.Next() {
+		var ev models.OrderEvent
+		var state string
+		if err := rows.Scan(&ev.At, &state, &ev.Actor, &ev.Message); err != nil {
+			return nil, err
+		}
+		ev.State = models.OrderState(state)
+		out = append(out, ev)
+	}
+	return out, rows.Err()
+}
+
+// OrderByID fetches an order along with its persisted timeline.
 func (p *Postgres) OrderByID(ctx context.Context, id string) (models.Order, error) {
 	row := p.db.QueryRowContext(ctx,
 		`SELECT id, number, kind, state, payment, student_id, teacher_id, session_id, courier_id, pickup_zone, pickup_at, org_id, class_id, created_at, completed_at, reschedule_count FROM orders WHERE id=$1`, id)
-	return scanOrder(row)
+	o, err := scanOrder(row)
+	if err != nil {
+		return o, err
+	}
+	if events, err := p.loadOrderEvents(ctx, o.ID); err == nil {
+		o.Timeline = events
+	}
+	return o, nil
 }
 
-// ListOrdersByStudent lists all orders for a student.
+// ListOrdersByStudent lists all orders for a student with timelines.
 func (p *Postgres) ListOrdersByStudent(ctx context.Context, studentID string) ([]models.Order, error) {
 	rows, err := p.db.QueryContext(ctx,
 		`SELECT id, number, kind, state, payment, student_id, teacher_id, session_id, courier_id, pickup_zone, pickup_at, org_id, class_id, created_at, completed_at, reschedule_count FROM orders WHERE student_id=$1 ORDER BY created_at DESC`, studentID)
@@ -245,10 +320,18 @@ func (p *Postgres) ListOrdersByStudent(ctx context.Context, studentID string) ([
 		}
 		out = append(out, o)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for i := range out {
+		if events, err := p.loadOrderEvents(ctx, out[i].ID); err == nil {
+			out[i].Timeline = events
+		}
+	}
+	return out, nil
 }
 
-// ListDeliveries lists all delivery-kind orders.
+// ListDeliveries lists all delivery-kind orders with timelines.
 func (p *Postgres) ListDeliveries(ctx context.Context) ([]models.Order, error) {
 	rows, err := p.db.QueryContext(ctx,
 		`SELECT id, number, kind, state, payment, student_id, teacher_id, session_id, courier_id, pickup_zone, pickup_at, org_id, class_id, created_at, completed_at, reschedule_count FROM orders WHERE kind='delivery' ORDER BY created_at ASC`)
@@ -264,7 +347,15 @@ func (p *Postgres) ListDeliveries(ctx context.Context) ([]models.Order, error) {
 		}
 		out = append(out, o)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for i := range out {
+		if events, err := p.loadOrderEvents(ctx, out[i].ID); err == nil {
+			out[i].Timeline = events
+		}
+	}
+	return out, nil
 }
 
 // CountDailyOrders counts orders created on a given day.
@@ -381,20 +472,28 @@ func (p *Postgres) AttemptsByOrder(ctx context.Context, orderID string) ([]model
 	return out, rows.Err()
 }
 
-// AppendAudit appends an audit entry.
+// AppendAudit appends an audit entry, preserving its OrgID tag.
 func (p *Postgres) AppendAudit(ctx context.Context, e models.AuditEntry) (models.AuditEntry, error) {
 	err := p.exec(ctx,
-		`INSERT INTO audit_log(id, at, actor, action, resource, detail, prev_hash, hash) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-		e.ID, e.At, e.Actor, e.Action, e.Resource, e.Detail, e.PrevHash, e.Hash,
+		`INSERT INTO audit_log(id, at, org_id, actor, action, resource, detail, prev_hash, hash) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+		e.ID, e.At, e.OrgID, e.Actor, e.Action, e.Resource, e.Detail, e.PrevHash, e.Hash,
 	)
 	return e, err
 }
 
-// SearchAudit runs a flexible SELECT against the audit log.
+// SearchAudit runs a flexible SELECT against the audit log. When the
+// filter carries an OrgID, the query returns only rows belonging to
+// that organisation plus system-wide rows (org_id = ''); this is how
+// tenant isolation is enforced for admin search/export surfaces.
 func (p *Postgres) SearchAudit(ctx context.Context, filter AuditFilter) ([]models.AuditEntry, error) {
-	q := `SELECT id, at, actor, action, resource, detail, prev_hash, hash FROM audit_log WHERE 1=1`
+	q := `SELECT id, at, org_id, actor, action, resource, detail, prev_hash, hash FROM audit_log WHERE 1=1`
 	args := []any{}
 	i := 1
+	if filter.OrgID != "" {
+		q += fmt.Sprintf(" AND (org_id=$%d OR org_id='')", i)
+		args = append(args, filter.OrgID)
+		i++
+	}
 	if filter.Actor != "" {
 		q += fmt.Sprintf(" AND actor=$%d", i)
 		args = append(args, filter.Actor)
@@ -427,7 +526,7 @@ func (p *Postgres) SearchAudit(ctx context.Context, filter AuditFilter) ([]model
 	out := []models.AuditEntry{}
 	for rows.Next() {
 		var e models.AuditEntry
-		if err := rows.Scan(&e.ID, &e.At, &e.Actor, &e.Action, &e.Resource, &e.Detail, &e.PrevHash, &e.Hash); err != nil {
+		if err := rows.Scan(&e.ID, &e.At, &e.OrgID, &e.Actor, &e.Action, &e.Resource, &e.Detail, &e.PrevHash, &e.Hash); err != nil {
 			return nil, err
 		}
 		out = append(out, e)
@@ -438,9 +537,9 @@ func (p *Postgres) SearchAudit(ctx context.Context, filter AuditFilter) ([]model
 // LatestAudit returns the last-appended audit entry.
 func (p *Postgres) LatestAudit(ctx context.Context) (models.AuditEntry, error) {
 	row := p.db.QueryRowContext(ctx,
-		`SELECT id, at, actor, action, resource, detail, prev_hash, hash FROM audit_log ORDER BY at DESC LIMIT 1`)
+		`SELECT id, at, org_id, actor, action, resource, detail, prev_hash, hash FROM audit_log ORDER BY at DESC LIMIT 1`)
 	var e models.AuditEntry
-	if err := row.Scan(&e.ID, &e.At, &e.Actor, &e.Action, &e.Resource, &e.Detail, &e.PrevHash, &e.Hash); err != nil {
+	if err := row.Scan(&e.ID, &e.At, &e.OrgID, &e.Actor, &e.Action, &e.Resource, &e.Detail, &e.PrevHash, &e.Hash); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return e, ErrNotFound
 		}
@@ -477,6 +576,117 @@ func (p *Postgres) ListDevices(ctx context.Context) ([]models.Device, error) {
 	return out, rows.Err()
 }
 
+// ListDeliveriesByOrg scopes delivery listings to one organisation and
+// attaches persisted timelines to each row.
+func (p *Postgres) ListDeliveriesByOrg(ctx context.Context, orgID string) ([]models.Order, error) {
+	rows, err := p.db.QueryContext(ctx,
+		`SELECT id, number, kind, state, payment, student_id, teacher_id, session_id, courier_id, pickup_zone, pickup_at, org_id, class_id, created_at, completed_at, reschedule_count
+		 FROM orders WHERE kind='delivery' AND org_id=$1 ORDER BY created_at ASC`, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []models.Order{}
+	for rows.Next() {
+		o, err := scanOrder(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, o)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for i := range out {
+		if events, err := p.loadOrderEvents(ctx, out[i].ID); err == nil {
+			out[i].Timeline = events
+		}
+	}
+	return out, nil
+}
+
+// UpsertPermission stores an admin-configurable permission overlay row.
+func (p *Postgres) UpsertPermission(ctx context.Context, perm models.Permission) error {
+	return p.exec(ctx,
+		`INSERT INTO permissions(org_id, action, roles) VALUES ($1,$2,$3)
+		 ON CONFLICT (org_id, action) DO UPDATE SET roles=EXCLUDED.roles`,
+		perm.OrgID, perm.Action, joinStrings(perm.Roles),
+	)
+}
+
+// ListPermissions returns every permission overlay for an organisation.
+func (p *Postgres) ListPermissions(ctx context.Context, orgID string) ([]models.Permission, error) {
+	rows, err := p.db.QueryContext(ctx,
+		`SELECT org_id, action, roles FROM permissions WHERE org_id=$1`, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []models.Permission{}
+	for rows.Next() {
+		var perm models.Permission
+		var roles string
+		if err := rows.Scan(&perm.OrgID, &perm.Action, &roles); err != nil {
+			return nil, err
+		}
+		perm.Roles = splitStrings(roles)
+		out = append(out, perm)
+	}
+	return out, rows.Err()
+}
+
+// UpsertContent inserts or replaces a teacher content item.
+func (p *Postgres) UpsertContent(ctx context.Context, c models.ContentItem) error {
+	return p.exec(ctx,
+		`INSERT INTO content_items(id, teacher_id, title, body, pinned, published, views, likes, favorites, followers, created_at, updated_at)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+		 ON CONFLICT (id) DO UPDATE SET title=EXCLUDED.title, body=EXCLUDED.body, pinned=EXCLUDED.pinned, published=EXCLUDED.published, views=EXCLUDED.views, likes=EXCLUDED.likes, favorites=EXCLUDED.favorites, followers=EXCLUDED.followers, updated_at=EXCLUDED.updated_at`,
+		c.ID, c.TeacherID, c.Title, c.Body, c.Pinned, c.Published, c.Views, c.Likes, c.Favorites, c.Followers, c.CreatedAt, c.UpdatedAt,
+	)
+}
+
+// DeleteContent removes a content item by id.
+func (p *Postgres) DeleteContent(ctx context.Context, id string) error {
+	return p.exec(ctx, `DELETE FROM content_items WHERE id=$1`, id)
+}
+
+// ContentByID fetches a single content item.
+func (p *Postgres) ContentByID(ctx context.Context, id string) (models.ContentItem, error) {
+	row := p.db.QueryRowContext(ctx,
+		`SELECT id, teacher_id, title, body, pinned, published, views, likes, favorites, followers, created_at, updated_at FROM content_items WHERE id=$1`, id)
+	return scanContent(row)
+}
+
+// ListContentByTeacher lists all content rows for a teacher.
+func (p *Postgres) ListContentByTeacher(ctx context.Context, teacherID string) ([]models.ContentItem, error) {
+	rows, err := p.db.QueryContext(ctx,
+		`SELECT id, teacher_id, title, body, pinned, published, views, likes, favorites, followers, created_at, updated_at FROM content_items WHERE teacher_id=$1 ORDER BY created_at DESC`, teacherID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []models.ContentItem{}
+	for rows.Next() {
+		c, err := scanContent(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+func scanContent(s scanner) (models.ContentItem, error) {
+	var c models.ContentItem
+	if err := s.Scan(&c.ID, &c.TeacherID, &c.Title, &c.Body, &c.Pinned, &c.Published, &c.Views, &c.Likes, &c.Favorites, &c.Followers, &c.CreatedAt, &c.UpdatedAt); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return c, ErrNotFound
+		}
+		return c, err
+	}
+	return c, nil
+}
+
 // -- scan helpers ---------------------------------------------------------
 
 type scanner interface {
@@ -485,20 +695,21 @@ type scanner interface {
 
 func scanUser(s scanner) (models.User, error) {
 	var u models.User
-	var role string
-	if err := s.Scan(&u.ID, &u.Username, &role, &u.OrgID, &u.PasswordHash, &u.PhoneCipher, &u.DisplayName, &u.Rating, &u.Load, &u.Location.Lat, &u.Location.Lng, &u.CreatedAt); err != nil {
+	var role, classIDs string
+	if err := s.Scan(&u.ID, &u.Username, &role, &u.OrgID, &classIDs, &u.PasswordHash, &u.PhoneCipher, &u.DisplayName, &u.Rating, &u.Load, &u.Location.Lat, &u.Location.Lng, &u.CreatedAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return u, ErrNotFound
 		}
 		return u, err
 	}
 	u.Role = models.Role(role)
+	u.ClassIDs = splitStrings(classIDs)
 	return u, nil
 }
 
 func scanSession(s scanner) (models.Session, error) {
 	var ss models.Session
-	if err := s.Scan(&ss.ID, &ss.TeacherID, &ss.ClassID, &ss.Title, &ss.StartsAt, &ss.EndsAt, &ss.Capacity, &ss.BookedSize, &ss.Location.Lat, &ss.Location.Lng); err != nil {
+	if err := s.Scan(&ss.ID, &ss.TeacherID, &ss.ClassID, &ss.OrgID, &ss.Title, &ss.StartsAt, &ss.EndsAt, &ss.Capacity, &ss.BookedSize, &ss.Location.Lat, &ss.Location.Lng); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ss, ErrNotFound
 		}

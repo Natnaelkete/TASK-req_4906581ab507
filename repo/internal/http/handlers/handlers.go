@@ -4,10 +4,13 @@
 package handlers
 
 import (
+	"github.com/gin-gonic/gin"
+
 	"github.com/eaglepoint/harborclass/internal/audit"
 	"github.com/eaglepoint/harborclass/internal/auth"
 	"github.com/eaglepoint/harborclass/internal/config"
 	"github.com/eaglepoint/harborclass/internal/dispatch"
+	"github.com/eaglepoint/harborclass/internal/models"
 	"github.com/eaglepoint/harborclass/internal/notify"
 	"github.com/eaglepoint/harborclass/internal/order"
 	"github.com/eaglepoint/harborclass/internal/store"
@@ -41,4 +44,18 @@ func New(d Deps) *Handlers {
 		cfg: d.Config, store: d.Store, auth: d.Auth, machine: d.Machine,
 		engine: d.Engine, chain: d.Chain, strategy: d.Strategy,
 	}
+}
+
+// can wraps auth.Can with the admin-configured permission overlay that
+// lives in the store, so any runtime change to permissions is honoured
+// without a restart.
+func (h *Handlers) can(c *gin.Context, u models.User, action auth.Action, target auth.Target) bool {
+	sub := auth.Subject{User: u}
+	if u.OrgID != "" {
+		perms, err := h.store.ListPermissions(c.Request.Context(), u.OrgID)
+		if err == nil && len(perms) > 0 {
+			sub.Overlay = auth.BuildOverlay(perms)
+		}
+	}
+	return auth.Can(sub, action, target)
 }

@@ -21,15 +21,16 @@ from `POST /api/auth/login`.
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET    | `/api/sessions` | List bookable sessions. Public. |
-| POST   | `/api/bookings` | Create a booking for the authenticated student. Auto-confirms and reserves capacity. |
+| GET    | `/api/sessions` | List bookable sessions. Authenticated; scoped to the caller's organisation (shared catalog entries with empty `OrgID` are still visible). |
+| POST   | `/api/bookings` | Create a booking for the authenticated student. Auto-confirms and reserves capacity. Rejects cross-org session ids with `403`. |
 | GET    | `/api/bookings/:id` | Fetch a booking with its timeline. |
 | POST   | `/api/bookings/:id/reschedule` | Reschedule a confirmed booking (max 2). |
 | POST   | `/api/bookings/:id/cancel` | Cancel a booking. Inside 24h returns `202` awaiting teacher approval. |
+| POST   | `/api/bookings/:id/complete` | Mark a booking completed. Restricted to the session's teacher or a same-org admin. Opens the 7-day refund window. |
 | POST   | `/api/bookings/:id/refund-request` | File a refund within 7 days of completion. Moves state to `refund_review`. |
 | GET    | `/api/my/orders` | List the student's own orders. |
 | POST   | `/api/my/subscriptions` | Toggle a subscription category for the current user. |
-| GET    | `/api/my/subscriptions/unsubscribe` | One-click unsubscribe. Public, takes `user=` and `category=` query params. |
+| GET    | `/api/my/subscriptions/unsubscribe` | One-click unsubscribe. Public, takes `user=`, `category=`, and `token=` query params. The `token` is an HMAC-SHA256 signature over `user|category|expiry` issued with every outbound reminder; requests with a missing, forged, or expired token return `403`. |
 
 ## Teacher content console
 
@@ -44,9 +45,10 @@ from `POST /api/auth/login`.
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET    | `/api/deliveries` | List delivery-kind orders. |
+| GET    | `/api/deliveries` | List delivery-kind orders scoped to the caller's organisation. |
 | POST   | `/api/deliveries` | Create a delivery order (dispatcher only). |
 | POST   | `/api/deliveries/:id/assign` | Assign a courier using the configured strategy. Returns `409` with `conflict:true` for blacklists, cutoffs, and double-bookings; `503` when no eligible courier exists. |
+| POST   | `/api/deliveries/:id/complete` | Mark a delivery completed. Allowed for the assigned courier or a same-org dispatcher/admin. Opens the 7-day refund window. |
 
 ## Notifications
 
@@ -70,24 +72,24 @@ from `POST /api/auth/login`.
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET    | `/api/audit-logs` | Search audit entries by `actor`, `resource`, `from`, `to`. Admin only. |
-| GET    | `/api/audit-logs/export` | Export filtered entries as CSV. Admin only. |
+| GET    | `/api/audit-logs` | Search audit entries by `actor`, `resource`, `from`, `to`. Admin only. Results are always scoped to the caller's organisation (plus system-wide rows). |
+| GET    | `/api/audit-logs/export` | Export filtered entries as CSV. Admin only. Same org-scoping as search. |
 
 ## Devices and upgrades
 
 | Method | Path | Description |
 |--------|------|-------------|
 | POST   | `/api/devices/register` | Register or update a managed device. |
-| GET    | `/api/devices/policy` | Fetch the upgrade decision for a device (`device_id`, `version`). |
+| GET    | `/api/devices/policy` | Fetch the upgrade decision for a device (`device_id`, `version`). Authenticated; only the registered owner or a same-org admin may call. Returns `403` for foreign devices. |
 
 ## Observability / ops
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET    | `/api/health` | Health check for load balancers and docker-compose. |
-| GET    | `/api/metrics` | Request counters (`requests`, `errors`). |
-| GET    | `/api/alerts` | Offline alerts synthesised from audit entries. |
-| POST   | `/api/crash-reports` | Persist a client-side crash into the audit log. |
+| GET    | `/api/health` | Public liveness probe for load balancers and docker-compose. |
+| GET    | `/api/metrics` | Request counters (`requests`, `errors`). Admin-only. |
+| GET    | `/api/alerts` | Offline alerts synthesised from audit entries. Admin-only and scoped to caller's organisation. |
+| POST   | `/api/crash-reports` | Persist a client-side crash into the audit log. Authenticated; actor is taken from the session and the request body is size-capped. |
 
 ## Server-rendered UI
 

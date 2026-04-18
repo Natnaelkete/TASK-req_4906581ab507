@@ -10,19 +10,12 @@ templ DispatcherDashboard(user models.User, couriers []models.User, deliveries [
 	</header>
 	<section aria-label="strategy">
 		<h2>Assignment strategy</h2>
-		<form method="post" action="/api/deliveries/assign">
-			<select name="strategy">
-				<option value="distance-first">distance-first</option>
-				<option value="rating-first">rating-first</option>
-				<option value="load-balanced">load-balanced</option>
-			</select>
-			<button>Assign</button>
-		</form>
+		<p class="hint">Each delivery row below carries its own Assign button targeting <code>/api/deliveries/{order_id}/assign</code>.</p>
 	</section>
 	<section aria-label="deliveries">
 		<h2>Delivery queue</h2>
 		<table>
-			<thead><tr><th>Order</th><th>Zone</th><th>Pickup</th><th>State</th></tr></thead>
+			<thead><tr><th>Order</th><th>Zone</th><th>Pickup</th><th>State</th><th>Assign</th></tr></thead>
 			<tbody>
 				for _, o := range deliveries {
 					<tr>
@@ -30,6 +23,16 @@ templ DispatcherDashboard(user models.User, couriers []models.User, deliveries [
 						<td>{ o.PickupZone }</td>
 						<td>{ o.PickupAt.Format("2006-01-02 15:04") }</td>
 						<td><span class={ "state-badge state-" + string(o.State) }>{ string(o.State) }</span></td>
+						<td>
+							<form method="post" action={ templ.SafeURL("/api/deliveries/" + o.ID + "/assign") } class="assign-form">
+								<select name="strategy">
+									<option value="distance-first">distance-first</option>
+									<option value="rating-first">rating-first</option>
+									<option value="load-balanced">load-balanced</option>
+								</select>
+								<button>Assign</button>
+							</form>
+						</td>
 					</tr>
 				}
 			</tbody>

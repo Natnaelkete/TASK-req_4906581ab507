@@ -25,6 +25,8 @@ type Memory struct {
 	attempts   []models.DeliveryAttempt
 	audit      []models.AuditEntry
 	devices    map[string]models.Device
+	perms      map[string]models.Permission // key = orgID|action
+	content    map[string]models.ContentItem
 }
 
 // NewMemory creates an empty in-memory store.
@@ -37,6 +39,8 @@ func NewMemory() *Memory {
 		templates:  map[string]models.NotificationTemplate{},
 		subs:       map[string]models.Subscription{},
 		devices:    map[string]models.Device{},
+		perms:      map[string]models.Permission{},
+		content:    map[string]models.ContentItem{},
 	}
 }
 
@@ -340,12 +344,17 @@ func (m *Memory) AppendAudit(_ context.Context, e models.AuditEntry) (models.Aud
 	return e, nil
 }
 
-// SearchAudit filters the audit log by actor/resource/time range.
+// SearchAudit filters the audit log by org/actor/resource/time range.
+// When OrgID is set, cross-tenant rows are excluded; rows without an
+// OrgID (system-wide events) remain visible to every admin.
 func (m *Memory) SearchAudit(_ context.Context, filter AuditFilter) ([]models.AuditEntry, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	out := []models.AuditEntry{}
 	for _, e := range m.audit {
+		if filter.OrgID != "" && e.OrgID != "" && e.OrgID != filter.OrgID {
+			continue
+		}
 		if filter.Actor != "" && !strings.EqualFold(e.Actor, filter.Actor) {
 			continue
 		}
@@ -393,5 +402,90 @@ func (m *Memory) ListDevices(_ context.Context) ([]models.Device, error) {
 	for _, d := range m.devices {
 		out = append(out, d)
 	}
+	return out, nil
+}
+
+// ListDeliveriesByOrg scopes deliveries to a single organisation for
+// object-level authorisation on the dispatcher queue.
+func (m *Memory) ListDeliveriesByOrg(_ context.Context, orgID string) ([]models.Order, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := []models.Order{}
+	for _, o := range m.orders {
+		if o.Kind != models.OrderDelivery {
+			continue
+		}
+		if orgID != "" && o.OrgID != orgID {
+			continue
+		}
+		out = append(out, o)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.Before(out[j].CreatedAt) })
+	return out, nil
+}
+
+func permKey(orgID, action string) string { return orgID + "|" + action }
+
+// UpsertPermission stores or replaces the admin-configurable role list
+// for a single (org, action) pair.
+func (m *Memory) UpsertPermission(_ context.Context, p models.Permission) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.perms[permKey(p.OrgID, p.Action)] = p
+	return nil
+}
+
+// ListPermissions returns the full permission overlay for an org.
+func (m *Memory) ListPermissions(_ context.Context, orgID string) ([]models.Permission, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := []models.Permission{}
+	for _, p := range m.perms {
+		if p.OrgID == orgID {
+			out = append(out, p)
+		}
+	}
+	return out, nil
+}
+
+// UpsertContent inserts or replaces a teacher content item.
+func (m *Memory) UpsertContent(_ context.Context, c models.ContentItem) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.content[c.ID] = c
+	return nil
+}
+
+// DeleteContent removes a content item by id.
+func (m *Memory) DeleteContent(_ context.Context, id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.content, id)
+	return nil
+}
+
+// ContentByID fetches a content item.
+func (m *Memory) ContentByID(_ context.Context, id string) (models.ContentItem, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	c, ok := m.content[id]
+	if !ok {
+		return models.ContentItem{}, ErrNotFound
+	}
+	return c, nil
+}
+
+// ListContentByTeacher returns every content item authored by a teacher
+// in reverse-chronological order.
+func (m *Memory) ListContentByTeacher(_ context.Context, teacherID string) ([]models.ContentItem, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := []models.ContentItem{}
+	for _, c := range m.content {
+		if c.TeacherID == teacherID {
+			out = append(out, c)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) })
 	return out, nil
 }

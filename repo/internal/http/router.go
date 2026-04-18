@@ -44,23 +44,27 @@ func NewRouter(d Dependencies) *gin.Engine {
 		Config:   d.Config,
 	})
 
-	// Health & ops
+	// Health & ops. /api/health stays public (liveness probe).
+	// The richer observability surfaces require an authenticated admin.
 	r.GET("/api/health", h.Health)
-	r.GET("/api/metrics", h.Metrics)
-	r.GET("/api/alerts", h.Alerts)
-	r.POST("/api/crash-reports", h.CrashReport)
+	r.GET("/api/metrics", middleware.RequireAuth(d.Auth), h.Metrics)
+	r.GET("/api/alerts", middleware.RequireAuth(d.Auth), h.Alerts)
+	r.POST("/api/crash-reports", middleware.RequireAuth(d.Auth), h.CrashReport)
 
 	// Auth
 	r.POST("/api/auth/login", h.Login)
 	r.POST("/api/auth/logout", middleware.RequireAuth(d.Auth), h.Logout)
 	r.GET("/api/auth/whoami", middleware.RequireAuth(d.Auth), h.WhoAmI)
 
-	// Student & teacher flows
-	r.GET("/api/sessions", h.ListSessions)
+	// Student & teacher flows. The session catalog is authenticated and
+	// scoped to the caller's organisation so cross-tenant session
+	// metadata is not discoverable by unauthenticated scans.
+	r.GET("/api/sessions", middleware.RequireAuth(d.Auth), h.ListSessions)
 	r.POST("/api/bookings", middleware.RequireAuth(d.Auth), h.CreateBooking)
 	r.GET("/api/bookings/:id", middleware.RequireAuth(d.Auth), h.GetBooking)
 	r.POST("/api/bookings/:id/reschedule", middleware.RequireAuth(d.Auth), h.RescheduleBooking)
 	r.POST("/api/bookings/:id/cancel", middleware.RequireAuth(d.Auth), h.CancelBooking)
+	r.POST("/api/bookings/:id/complete", middleware.RequireAuth(d.Auth), h.CompleteBooking)
 	r.POST("/api/bookings/:id/refund-request", middleware.RequireAuth(d.Auth), h.RefundRequest)
 	r.GET("/api/my/orders", middleware.RequireAuth(d.Auth), h.MyOrders)
 	r.POST("/api/my/subscriptions", middleware.RequireAuth(d.Auth), h.UpdateSubscription)
@@ -76,6 +80,7 @@ func NewRouter(d Dependencies) *gin.Engine {
 	r.GET("/api/deliveries", middleware.RequireAuth(d.Auth), h.ListDeliveries)
 	r.POST("/api/deliveries", middleware.RequireAuth(d.Auth), h.CreateDelivery)
 	r.POST("/api/deliveries/:id/assign", middleware.RequireAuth(d.Auth), h.AssignCourier)
+	r.POST("/api/deliveries/:id/complete", middleware.RequireAuth(d.Auth), h.CompleteDelivery)
 
 	// Notifications
 	r.POST("/api/notifications/send", middleware.RequireAuth(d.Auth), h.SendNotification)

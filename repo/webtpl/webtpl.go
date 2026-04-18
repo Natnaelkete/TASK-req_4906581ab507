@@ -131,22 +131,27 @@ func renderWindow(label string, w Window) string {
 }
 
 // RenderDispatcherDashboard renders the dispatcher's live view with
-// assignment controls and conflict messages.
+// per-order assignment forms and conflict messages. Each row posts to
+// the parameterised route /api/deliveries/{id}/assign so the action
+// always targets a specific order.
 func RenderDispatcherDashboard(d DispatcherData) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, `<header class="topbar" data-role="dispatcher"><h1>Dispatcher Console</h1><p>%s</p></header>`, html.EscapeString(d.User.DisplayName))
 	b.WriteString(`<section aria-label="strategy"><h2>Assignment strategy</h2>`)
-	b.WriteString(`<form method="post" action="/api/deliveries/assign"><select name="strategy">`)
-	b.WriteString(`<option value="distance-first">distance-first</option>`)
-	b.WriteString(`<option value="rating-first">rating-first</option>`)
-	b.WriteString(`<option value="load-balanced">load-balanced</option>`)
-	b.WriteString(`</select><button>Assign</button></form></section>`)
-	b.WriteString(`<section aria-label="deliveries"><h2>Delivery queue</h2><table><thead><tr><th>Order</th><th>Zone</th><th>Pickup</th><th>State</th></tr></thead><tbody>`)
+	b.WriteString(`<p class="hint">Each delivery row below carries its own Assign button targeting <code>/api/deliveries/{order_id}/assign</code>.</p>`)
+	b.WriteString(`</section>`)
+	b.WriteString(`<section aria-label="deliveries"><h2>Delivery queue</h2><table><thead><tr><th>Order</th><th>Zone</th><th>Pickup</th><th>State</th><th>Assign</th></tr></thead><tbody>`)
 	for _, o := range d.Deliveries {
-		fmt.Fprintf(&b, `<tr><td>%s</td><td>%s</td><td>%s</td><td><span class="state-badge state-%s">%s</span></td></tr>`,
+		fmt.Fprintf(&b, `<tr><td>%s</td><td>%s</td><td>%s</td><td><span class="state-badge state-%s">%s</span></td>`,
 			html.EscapeString(o.Number), html.EscapeString(o.PickupZone),
 			html.EscapeString(o.PickupAt.Format("2006-01-02 15:04")),
 			html.EscapeString(string(o.State)), html.EscapeString(stateLabel(o.State)))
+		fmt.Fprintf(&b, `<td><form method="post" action="/api/deliveries/%s/assign" class="assign-form">`, html.EscapeString(o.ID))
+		b.WriteString(`<select name="strategy">`)
+		b.WriteString(`<option value="distance-first">distance-first</option>`)
+		b.WriteString(`<option value="rating-first">rating-first</option>`)
+		b.WriteString(`<option value="load-balanced">load-balanced</option>`)
+		b.WriteString(`</select><button>Assign</button></form></td></tr>`)
 	}
 	b.WriteString(`</tbody></table></section>`)
 	b.WriteString(`<section aria-label="couriers"><h2>Couriers</h2><ul>`)

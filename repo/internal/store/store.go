@@ -65,10 +65,26 @@ type Store interface {
 	// Devices
 	UpsertDevice(ctx context.Context, d models.Device) error
 	ListDevices(ctx context.Context) ([]models.Device, error)
+
+	// Scoped queries for object-level authorisation.
+	ListDeliveriesByOrg(ctx context.Context, orgID string) ([]models.Order, error)
+
+	// Permissions (admin-configurable overlay on auth.Can).
+	UpsertPermission(ctx context.Context, p models.Permission) error
+	ListPermissions(ctx context.Context, orgID string) ([]models.Permission, error)
+
+	// Teacher content items (posts + class materials).
+	UpsertContent(ctx context.Context, c models.ContentItem) error
+	DeleteContent(ctx context.Context, id string) error
+	ContentByID(ctx context.Context, id string) (models.ContentItem, error)
+	ListContentByTeacher(ctx context.Context, teacherID string) ([]models.ContentItem, error)
 }
 
-// AuditFilter narrows audit log searches.
+// AuditFilter narrows audit log searches. When OrgID is set, only rows
+// tagged to that tenant (or system-wide rows with empty OrgID) are
+// returned; admins can never see another org's audit history.
 type AuditFilter struct {
+	OrgID    string
 	Actor    string
 	Resource string
 	From     time.Time

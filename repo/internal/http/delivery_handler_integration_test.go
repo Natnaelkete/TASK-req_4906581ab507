@@ -3,6 +3,7 @@ package http_test
 import (
 	"context"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -86,12 +87,19 @@ func TestListDeliveriesEnumerates(t *testing.T) {
 // the create endpoint and focus on assignment behaviour.
 func seedDelivery(t *testing.T, h *harness, zone string, pickup time.Time) string {
 	t.Helper()
+	return seedDeliveryInOrg(t, h, zone, pickup, "org-main")
+}
+
+// seedDeliveryInOrg persists a delivery under an explicit organisation,
+// used by cross-tenant negative tests.
+func seedDeliveryInOrg(t *testing.T, h *harness, zone string, pickup time.Time, orgID string) string {
+	t.Helper()
 	o := models.Order{
-		ID:         "dlv-" + zone + "-" + pickup.Format("20060102150405"),
-		Number:     "HC-TEST-" + zone + "-" + pickup.Format("150405"),
+		ID:         "dlv-" + orgID + "-" + zone + "-" + pickup.Format("20060102150405"),
+		Number:     "HC-TEST-" + orgID + "-" + zone + "-" + pickup.Format("150405"),
 		Kind:       models.OrderDelivery,
 		State:      models.StateCreated,
-		OrgID:      "org-main",
+		OrgID:      orgID,
 		PickupZone: zone,
 		PickupAt:   pickup,
 		CreatedAt:  time.Now(),
@@ -100,4 +108,99 @@ func seedDelivery(t *testing.T, h *harness, zone string, pickup time.Time) strin
 		t.Fatalf("seed delivery: %v", err)
 	}
 	return o.ID
+}
+
+// TestListDeliveriesIsOrgScoped seeds deliveries for two organisations
+// and verifies the dispatcher of one org never sees the other org's
+// queue.
+func TestListDeliveriesIsOrgScoped(t *testing.T) {
+	h := newHarness(t)
+	tok := h.loginAs(t, "dispatcher", "dispatch-pass")
+	_ = seedDeliveryInOrg(t, h, "east", morningPickup(0), "org-main")
+	foreign := seedDeliveryInOrg(t, h, "east", morningPickup(3*time.Hour), "org-other")
+	rec := h.do(t, http.MethodGet, "/api/deliveries", "", tok)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d", rec.Code)
+	}
+	body := mustJSON(t, rec.Body.Bytes())
+	ds, _ := body["deliveries"].([]any)
+	for _, d := range ds {
+		if m, ok := d.(map[string]any); ok {
+			if id, _ := m["ID"].(string); id == foreign {
+				t.Fatalf("dispatcher saw foreign-org delivery %s", id)
+			}
+		}
+	}
+}
+
+// TestAssignCourierCrossOrgForbidden proves that an attempt to assign
+// a courier to a delivery belonging to a different organisation is
+// rejected with 403, regardless of the role gate passing.
+func TestAssignCourierCrossOrgForbidden(t *testing.T) {
+	h := newHarness(t)
+	tok := h.loginAs(t, "dispatcher", "dispatch-pass")
+	id := seedDeliveryInOrg(t, h, "east", morningPickup(0), "org-other")
+	rec := h.do(t, http.MethodPost, "/api/deliveries/"+id+"/assign", `{"facility_id":"fac-main"}`, tok)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 cross-org, got %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestListDeliveriesForbiddenForStudent confirms non-dispatcher roles
+// are denied the delivery queue entirely.
+func TestListDeliveriesForbiddenForStudent(t *testing.T) {
+	h := newHarness(t)
+	tok := h.loginAs(t, "student", "student-pass")
+	rec := h.do(t, http.MethodGet, "/api/deliveries", "", tok)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for student, got %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestDispatcherPageOrgScoped proves the /dispatcher server-rendered
+// view is scoped to the dispatcher's organisation and never leaks
+// foreign-org delivery numbers into the HTML.
+func TestDispatcherPageOrgScoped(t *testing.T) {
+	h := newHarness(t)
+	_ = seedDeliveryInOrg(t, h, "east", morningPickup(0), "org-main")
+	foreign := seedDeliveryInOrg(t, h, "east", morningPickup(3*time.Hour), "org-other")
+	foreignOrder, err := h.store.OrderByID(context.Background(), foreign)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tok := h.loginAs(t, "dispatcher", "dispatch-pass")
+	rec := h.do(t, http.MethodGet, "/dispatcher", "", tok)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d body=%s", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), foreignOrder.Number) {
+		t.Fatalf("dispatcher page leaked foreign-org order number %s", foreignOrder.Number)
+	}
+}
+
+// TestCompleteDeliveryAllowsCourier proves the assigned courier can
+// mark a delivery completed through the new HTTP lifecycle endpoint.
+func TestCompleteDeliveryAllowsCourier(t *testing.T) {
+	h := newHarness(t)
+	id := seedDelivery(t, h, "east", morningPickup(0))
+	ctx := context.Background()
+	o, err := h.store.OrderByID(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	o.CourierID = "usr-courier"
+	o.State = models.StateInProgress
+	if err := h.store.UpdateOrder(ctx, o); err != nil {
+		t.Fatal(err)
+	}
+	tok := h.loginAs(t, "courier", "courier-pass")
+	rec := h.do(t, http.MethodPost, "/api/deliveries/"+id+"/complete", "", tok)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	body := mustJSON(t, rec.Body.Bytes())
+	if body["state"] != string(models.StateCompleted) {
+		t.Fatalf("expected completed, got %v", body["state"])
+	}
 }

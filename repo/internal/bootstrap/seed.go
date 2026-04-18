@@ -70,10 +70,45 @@ func Seed(ctx context.Context, s store.Store, cfg config.Config) error {
 		ID:        "sess-demo-1",
 		TeacherID: "usr-teacher",
 		ClassID:   "class-default",
+		OrgID:     "org-main",
 		Title:     "Intro to HarborClass",
 		StartsAt:  time.Now().Add(48 * time.Hour),
 		EndsAt:    time.Now().Add(49 * time.Hour),
 		Capacity:  20,
 	})
+	seedTeacherContent(ctx, s, "usr-teacher")
 	return notify.SeedTemplates(ctx, s)
+}
+
+// seedTeacherContent installs a handful of demo content items so that
+// the teacher console shows realistic pinned posts and non-zero
+// analytics windows on first boot.
+func seedTeacherContent(ctx context.Context, s store.Store, teacherID string) {
+	now := time.Now()
+	items := []models.ContentItem{
+		{
+			ID: "content-welcome", TeacherID: teacherID, Title: "Welcome post",
+			Body: "Welcome to the studio.",
+			Pinned: true, Published: true,
+			Views: 420, Likes: 57, Favorites: 12, Followers: 4,
+			CreatedAt: now.Add(-3 * 24 * time.Hour), UpdatedAt: now.Add(-3 * 24 * time.Hour),
+		},
+		{
+			ID: "content-starter-kit", TeacherID: teacherID, Title: "Starter kit",
+			Body: "Everything new students need to know.",
+			Pinned: true, Published: true,
+			Views: 1480, Likes: 183, Favorites: 46, Followers: 13,
+			CreatedAt: now.Add(-20 * 24 * time.Hour), UpdatedAt: now.Add(-20 * 24 * time.Hour),
+		},
+		{
+			ID: "content-archive", TeacherID: teacherID, Title: "Last quarter retrospective",
+			Body: "Recap of last quarter.",
+			Pinned: false, Published: true,
+			Views: 3940, Likes: 372, Favorites: 121, Followers: 24,
+			CreatedAt: now.Add(-80 * 24 * time.Hour), UpdatedAt: now.Add(-80 * 24 * time.Hour),
+		},
+	}
+	for _, it := range items {
+		_ = s.UpsertContent(ctx, it)
+	}
 }

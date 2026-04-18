@@ -16,7 +16,7 @@ func TestDispatcherDashboardShowsStrategyAndDeliveries(t *testing.T) {
 			{ID: "c1", DisplayName: "Casey Courier", Rating: 4.9, Load: 2},
 		},
 		Deliveries: []models.Order{
-			{Number: "HC-03282026-000011", PickupZone: "east", PickupAt: time.Date(2026, 3, 28, 9, 0, 0, 0, time.UTC), State: models.StateInProgress},
+			{ID: "dlv-east-01", Number: "HC-03282026-000011", PickupZone: "east", PickupAt: time.Date(2026, 3, 28, 9, 0, 0, 0, time.UTC), State: models.StateInProgress},
 		},
 	}
 	html := webtpl.RenderDispatcherDashboard(d)
@@ -35,6 +35,26 @@ func TestDispatcherDashboardShowsStrategyAndDeliveries(t *testing.T) {
 		if !strings.Contains(html, need) {
 			t.Fatalf("dispatcher HTML missing %q", need)
 		}
+	}
+}
+
+// TestDispatcherAssignFormIsPerOrder verifies the UI action path is a
+// parameterised /api/deliveries/{id}/assign and not the bare endpoint,
+// which matches the backend route contract in router.go.
+func TestDispatcherAssignFormIsPerOrder(t *testing.T) {
+	d := webtpl.DispatcherData{
+		User: models.User{DisplayName: "Dana Dispatcher", Role: models.RoleDispatcher},
+		Deliveries: []models.Order{
+			{ID: "dlv-east-01", Number: "HC-03282026-000011", PickupZone: "east", PickupAt: time.Date(2026, 3, 28, 9, 0, 0, 0, time.UTC), State: models.StateInProgress},
+		},
+	}
+	html := webtpl.RenderDispatcherDashboard(d)
+	need := `action="/api/deliveries/dlv-east-01/assign"`
+	if !strings.Contains(html, need) {
+		t.Fatalf("dispatcher HTML missing per-order form action %q\nhtml=%s", need, html)
+	}
+	if strings.Contains(html, `action="/api/deliveries/assign"`) {
+		t.Fatal("dispatcher HTML still renders unparameterised /api/deliveries/assign action")
 	}
 }
 

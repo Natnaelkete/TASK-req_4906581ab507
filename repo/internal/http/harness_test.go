@@ -122,3 +122,11 @@ func mustJSON(t *testing.T, body []byte) map[string]any {
 	}
 	return m
 }
+
+// signUnsubscribe mints a valid signed unsubscribe token using the
+// harness's encryption key — tests can now exercise the one-click
+// flow without reproducing the HMAC logic inline.
+func (h *harness) signUnsubscribe(user, category string) string {
+	key := auth.DeriveKey(h.cfg.EncryptionKey)
+	return auth.SignUnsubscribe(key, user, category, time.Now())
+}

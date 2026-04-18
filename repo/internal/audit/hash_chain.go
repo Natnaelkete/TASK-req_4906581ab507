@@ -29,8 +29,11 @@ func New(s store.Store) *Chain {
 }
 
 // Append adds a new entry; the hash is derived from the previous hash
-// and the payload fields so the chain is verifiable.
-func (c *Chain) Append(ctx context.Context, actor, action, resource, detail string) (models.AuditEntry, error) {
+// and the payload fields so the chain is verifiable. orgID tags the
+// entry to its tenant so search/export can filter out foreign-org
+// rows; callers should pass the authenticated user's OrgID (or "" for
+// system-wide events such as anonymous failures).
+func (c *Chain) Append(ctx context.Context, orgID, actor, action, resource, detail string) (models.AuditEntry, error) {
 	prev := ""
 	if last, err := c.Store.LatestAudit(ctx); err == nil {
 		prev = last.Hash
@@ -40,6 +43,7 @@ func (c *Chain) Append(ctx context.Context, actor, action, resource, detail stri
 	e := models.AuditEntry{
 		ID:       fmt.Sprintf("evt-%d", c.Clock().UnixNano()),
 		At:       c.Clock(),
+		OrgID:    orgID,
 		Actor:    actor,
 		Action:   action,
 		Resource: resource,
@@ -50,12 +54,16 @@ func (c *Chain) Append(ctx context.Context, actor, action, resource, detail stri
 	return c.Store.AppendAudit(ctx, e)
 }
 
-// Hash returns the canonical hash over an audit entry's fields.
+// Hash returns the canonical hash over an audit entry's fields. OrgID
+// participates so a later attempt to relabel an entry's tenant breaks
+// the chain just like any other tampering.
 func Hash(e models.AuditEntry) string {
 	h := sha256.New()
 	io.WriteString(h, e.ID)
 	io.WriteString(h, "|")
 	io.WriteString(h, e.At.UTC().Format(time.RFC3339Nano))
+	io.WriteString(h, "|")
+	io.WriteString(h, e.OrgID)
 	io.WriteString(h, "|")
 	io.WriteString(h, e.Actor)
 	io.WriteString(h, "|")

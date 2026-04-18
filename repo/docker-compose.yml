@@ -30,6 +30,7 @@ services:
       HARBORCLASS_MIGRATIONS: "/app/migrations.sql"
       HARBORCLASS_SEED: "true"
       HARBORCLASS_ENCRYPTION_KEY: "dev-only-encryption-key-change-me-32"
+      HARBORCLASS_REQUIRE_DB: "true"
     ports:
       - "8080:8080"
 

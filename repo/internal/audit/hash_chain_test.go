@@ -22,11 +22,11 @@ func newChain() (*audit.Chain, *store.Memory) {
 func TestAppendChainsByPrevHash(t *testing.T) {
 	c, _ := newChain()
 	ctx := context.Background()
-	e1, err := c.Append(ctx, "admin", "login", "auth", "")
+	e1, err := c.Append(ctx, "org-main", "admin", "login", "auth", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	e2, err := c.Append(ctx, "admin", "booking.create", "o1", "HC-03282026-000742")
+	e2, err := c.Append(ctx, "org-main", "admin", "booking.create", "o1", "HC-03282026-000742")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,9 +44,9 @@ func TestAppendChainsByPrevHash(t *testing.T) {
 func TestVerifyDetectsTampering(t *testing.T) {
 	c, _ := newChain()
 	ctx := context.Background()
-	_, _ = c.Append(ctx, "admin", "login", "auth", "")
-	_, _ = c.Append(ctx, "admin", "booking.create", "o1", "")
-	_, _ = c.Append(ctx, "admin", "booking.confirm", "o1", "")
+	_, _ = c.Append(ctx, "org-main", "admin", "login", "auth", "")
+	_, _ = c.Append(ctx, "org-main", "admin", "booking.create", "o1", "")
+	_, _ = c.Append(ctx, "org-main", "admin", "booking.confirm", "o1", "")
 	rows, _ := c.Search(ctx, store.AuditFilter{})
 	if bad := audit.Verify(rows); bad != -1 {
 		t.Fatalf("expected intact chain, tamper at %d", bad)
@@ -71,8 +71,8 @@ func TestHashDeterministic(t *testing.T) {
 func TestSearchFilters(t *testing.T) {
 	c, _ := newChain()
 	ctx := context.Background()
-	_, _ = c.Append(ctx, "admin", "login", "auth", "")
-	_, _ = c.Append(ctx, "student", "booking.create", "o1", "")
+	_, _ = c.Append(ctx, "org-main", "admin", "login", "auth", "")
+	_, _ = c.Append(ctx, "org-main", "student", "booking.create", "o1", "")
 	rows, _ := c.Search(ctx, store.AuditFilter{Actor: "student"})
 	if len(rows) != 1 || rows[0].Actor != "student" {
 		t.Fatalf("search by actor failed: %+v", rows)
@@ -82,8 +82,8 @@ func TestSearchFilters(t *testing.T) {
 func TestExportCSV(t *testing.T) {
 	c, _ := newChain()
 	ctx := context.Background()
-	_, _ = c.Append(ctx, "admin", "login", "auth", "")
-	_, _ = c.Append(ctx, "admin", "audit.export", "audit_log", "detail with, comma")
+	_, _ = c.Append(ctx, "org-main", "admin", "login", "auth", "")
+	_, _ = c.Append(ctx, "org-main", "admin", "audit.export", "audit_log", "detail with, comma")
 	var buf bytes.Buffer
 	if err := c.ExportTo(ctx, store.AuditFilter{}, &buf); err != nil {
 		t.Fatal(err)

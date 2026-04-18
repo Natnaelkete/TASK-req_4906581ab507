@@ -41,10 +41,14 @@ type Location struct {
 }
 
 // Session is a scheduled class/event that students can book into.
+// OrgID is the tenant boundary: booking creation must verify the
+// session belongs to the student's organisation, otherwise sessions
+// could be booked across tenants by guessing session ids.
 type Session struct {
 	ID         string
 	TeacherID  string
 	ClassID    string
+	OrgID      string
 	Title      string
 	StartsAt   time.Time
 	EndsAt     time.Time
@@ -158,10 +162,15 @@ type DeliveryAttempt struct {
 	Error      string
 }
 
-// AuditEntry is one entry in the tamper-evident audit chain.
+// AuditEntry is one entry in the tamper-evident audit chain. OrgID is
+// the tenant the action occurred in; search/export paths filter by
+// this so admins cannot read entries belonging to other organisations.
+// A blank OrgID denotes a system-wide event (e.g. unauthenticated
+// failures) and is visible to every tenant admin.
 type AuditEntry struct {
 	ID        string
 	At        time.Time
+	OrgID     string
 	Actor     string
 	Action    string
 	Resource  string
@@ -179,4 +188,30 @@ type Device struct {
 	Canary         bool
 	ForcedUpgradeTo string
 	LastSeen       time.Time
+}
+
+// Permission is a per-org overlay on top of the static authorisation
+// matrix. Roles listed here are granted the named action within OrgID.
+type Permission struct {
+	OrgID  string
+	Action string
+	Roles  []string
+}
+
+// ContentItem is a teacher-authored piece of content (post or class
+// material). Analytics roll up from the Views/Likes/Favorites/Followers
+// fields and CreatedAt is used to bucket into 7/30/90-day windows.
+type ContentItem struct {
+	ID        string
+	TeacherID string
+	Title     string
+	Body      string
+	Pinned    bool
+	Published bool
+	Views     int
+	Likes     int
+	Favorites int
+	Followers int
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }

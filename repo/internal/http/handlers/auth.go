@@ -22,14 +22,14 @@ func (h *Handlers) Login(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credentials"})
 		return
 	}
-	_, _ = h.chain.Append(c.Request.Context(), u.Username, "login", "auth", "")
+	_, _ = h.chain.Append(c.Request.Context(), u.OrgID, u.Username, "login", "auth", "")
 	c.JSON(http.StatusOK, gin.H{
-		"token":       tok,
-		"role":        u.Role,
-		"username":    u.Username,
-		"display":     u.DisplayName,
-		"org_id":      u.OrgID,
-		"phone_mask":  auth.MaskPhone(u.DisplayName), // display placeholder; real phone stays ciphered
+		"token":      tok,
+		"role":       u.Role,
+		"username":   u.Username,
+		"display":    u.DisplayName,
+		"org_id":     u.OrgID,
+		"phone_mask": h.maskedPhone(u),
 	})
 }
 
@@ -47,13 +47,29 @@ func (h *Handlers) Logout(c *gin.Context) {
 func (h *Handlers) WhoAmI(c *gin.Context) {
 	u := currentUser(c)
 	c.JSON(http.StatusOK, gin.H{
-		"username":    u.Username,
-		"role":        u.Role,
-		"display":     u.DisplayName,
-		"org_id":      u.OrgID,
-		"phone_mask":  auth.MaskPhone(""), // real phone lives encrypted only
-		"class_ids":   u.ClassIDs,
+		"username":   u.Username,
+		"role":       u.Role,
+		"display":    u.DisplayName,
+		"org_id":     u.OrgID,
+		"phone_mask": h.maskedPhone(u),
+		"class_ids":  u.ClassIDs,
 	})
+}
+
+// maskedPhone decrypts the stored phone ciphertext (if any) and returns
+// a display-safe masked form. If decryption fails or no phone is on
+// record, the sentinel "unavailable" is returned so clients aren't
+// misled into thinking DisplayName is a phone.
+func (h *Handlers) maskedPhone(u models.User) string {
+	if u.PhoneCipher == "" {
+		return "unavailable"
+	}
+	key := auth.DeriveKey(h.cfg.EncryptionKey)
+	plain, err := auth.DecryptPII(key, u.PhoneCipher)
+	if err != nil || plain == "" {
+		return "unavailable"
+	}
+	return auth.MaskPhone(plain)
 }
 
 func currentUser(c *gin.Context) models.User {

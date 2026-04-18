@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/base64"
 	"errors"
 	"strings"
@@ -15,8 +16,9 @@ import (
 // ErrInvalidCredentials is returned when login fails.
 var ErrInvalidCredentials = errors.New("invalid credentials")
 
-// Service manages sessions. Session tokens are opaque and live in
-// memory; this keeps the demo offline and dependency-free.
+// Service manages sessions. Session tokens are opaque, 32 bytes from
+// crypto/rand, and live in memory; this keeps the demo offline and
+// dependency-free while remaining cryptographically strong.
 type Service struct {
 	store store.Store
 
@@ -43,7 +45,10 @@ func (s *Service) Login(ctx context.Context, username, password string) (string,
 	if !VerifyPassword(password, u.PasswordHash) {
 		return "", models.User{}, ErrInvalidCredentials
 	}
-	tok := newToken()
+	tok, err := newToken()
+	if err != nil {
+		return "", models.User{}, err
+	}
 	s.mu.Lock()
 	s.sessions[tok] = session{Username: username, Expires: time.Now().Add(12 * time.Hour)}
 	s.mu.Unlock()
@@ -82,12 +87,12 @@ func ExtractBearerToken(header string) string {
 	return strings.TrimSpace(strings.TrimPrefix(header, prefix))
 }
 
-func newToken() string {
-	// 16 random bytes encoded url-safely. Opaque to callers.
-	b := make([]byte, 16)
-	for i := range b {
-		b[i] = byte(time.Now().UnixNano()>>uint(i*3)) ^ byte(i*7+3)
+// newToken returns 32 bytes of crypto/rand entropy, url-safe encoded.
+// Tokens are 256 bits — not derived from clock state or any caller input.
+func newToken() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
 	}
-	b[0] ^= byte(time.Now().Unix() & 0xff)
-	return base64.RawURLEncoding.EncodeToString(b)
+	return base64.RawURLEncoding.EncodeToString(b), nil
 }

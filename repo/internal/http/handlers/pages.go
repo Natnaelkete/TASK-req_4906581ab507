@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -27,33 +28,63 @@ func (h *Handlers) StudentPage(c *gin.Context) {
 	c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(html))
 }
 
-// TeacherPage serves the teacher content console.
+// TeacherPage serves the teacher content console. Analytics windows
+// are computed from the live content store so the rendered page
+// reflects the same numbers as /api/teacher/analytics.
 func (h *Handlers) TeacherPage(c *gin.Context) {
 	u := currentUser(c)
 	if u.Role != models.RoleTeacher {
 		c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
 		return
 	}
+	items, _ := h.store.ListContentByTeacher(c.Request.Context(), u.ID)
+	now := time.Now()
 	html := webtpl.RenderTeacherDashboard(webtpl.TeacherData{
 		User: u,
 		Analytics: webtpl.Analytics{
-			Window7:  webtpl.Window{Views: 420, Likes: 57, Favorites: 12, Followers: 4},
-			Window30: webtpl.Window{Views: 1900, Likes: 240, Favorites: 58, Followers: 17},
-			Window90: webtpl.Window{Views: 5840, Likes: 612, Favorites: 179, Followers: 41},
+			Window7:  rollupWindow(items, now.Add(-7*24*time.Hour)),
+			Window30: rollupWindow(items, now.Add(-30*24*time.Hour)),
+			Window90: rollupWindow(items, now.Add(-90*24*time.Hour)),
 		},
 	})
 	c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(html))
 }
 
-// DispatcherPage serves the dispatcher assignment view.
+// rollupWindow accumulates content-item metrics that fall within the
+// given trailing window. Matches the rollup in TeacherAnalytics so the
+// server-rendered dashboard and the JSON API stay consistent.
+func rollupWindow(items []models.ContentItem, since time.Time) webtpl.Window {
+	var w webtpl.Window
+	for _, it := range items {
+		if it.CreatedAt.Before(since) {
+			continue
+		}
+		w.Views += it.Views
+		w.Likes += it.Likes
+		w.Favorites += it.Favorites
+		w.Followers += it.Followers
+	}
+	return w
+}
+
+// DispatcherPage serves the dispatcher assignment view. Both the
+// delivery queue and the courier roster are scoped to the dispatcher's
+// organisation so the HTML surface enforces the same tenant isolation
+// as the JSON deliveries API.
 func (h *Handlers) DispatcherPage(c *gin.Context) {
 	u := currentUser(c)
 	if u.Role != models.RoleDispatcher {
 		c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
 		return
 	}
-	couriers, _ := h.store.ListUsersByRole(c.Request.Context(), models.RoleCourier)
-	deliveries, _ := h.store.ListDeliveries(c.Request.Context())
+	allCouriers, _ := h.store.ListUsersByRole(c.Request.Context(), models.RoleCourier)
+	couriers := make([]models.User, 0, len(allCouriers))
+	for _, co := range allCouriers {
+		if co.OrgID == "" || co.OrgID == u.OrgID {
+			couriers = append(couriers, co)
+		}
+	}
+	deliveries, _ := h.store.ListDeliveriesByOrg(c.Request.Context(), u.OrgID)
 	html := webtpl.RenderDispatcherDashboard(webtpl.DispatcherData{
 		User: u, Couriers: couriers, Deliveries: deliveries,
 	})

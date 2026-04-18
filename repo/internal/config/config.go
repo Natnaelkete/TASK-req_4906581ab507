@@ -20,6 +20,7 @@ type Config struct {
 	RetryMaxAttempts int
 	RetryBaseDelay   time.Duration
 	PickupCutoffHour int
+	RequireDatabase  bool
 }
 
 // Load reads configuration from environment variables, applying defaults
@@ -35,6 +36,7 @@ func Load() Config {
 		RetryMaxAttempts: getenvInt("HARBORCLASS_RETRY_MAX", 5),
 		RetryBaseDelay:   time.Duration(getenvInt("HARBORCLASS_RETRY_BASE_MS", 500)) * time.Millisecond,
 		PickupCutoffHour: getenvInt("HARBORCLASS_PICKUP_CUTOFF_HOUR", 20),
+		RequireDatabase:  getenvBool("HARBORCLASS_REQUIRE_DB", false),
 	}
 }
 

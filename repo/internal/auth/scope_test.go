@@ -2,6 +2,7 @@ package auth_test
 
 import (
 	"testing"
+	"time"
 
 	"github.com/eaglepoint/harborclass/internal/auth"
 	"github.com/eaglepoint/harborclass/internal/models"
@@ -104,5 +105,56 @@ func TestExtractBearerToken(t *testing.T) {
 	}
 	if auth.ExtractBearerToken("Basic xx") != "" {
 		t.Fatal("non-bearer should yield empty token")
+	}
+}
+
+// TestOverlayGrantsAndDenies covers the dynamic permission overlay used
+// by admin.Permissions. A teacher is not normally allowed to export the
+// audit log; when admins add an overlay that grants ExportAudit to the
+// teacher role, Can returns true for the same-org teacher subject.
+func TestOverlayGrantsAndDenies(t *testing.T) {
+	teacher := auth.Subject{
+		User: models.User{ID: "t1", Role: models.RoleTeacher, OrgID: "o1"},
+	}
+	// Without overlay: denied.
+	if auth.Can(teacher, auth.ActionExportAudit, auth.Target{OrgID: "o1"}) {
+		t.Fatal("baseline: teacher should not export audit")
+	}
+	// With overlay granting teacher role: allowed (and still org-scoped).
+	overlay := auth.BuildOverlay([]models.Permission{
+		{OrgID: "o1", Action: string(auth.ActionExportAudit), Roles: []string{string(models.RoleTeacher)}},
+	})
+	grant := auth.Subject{User: teacher.User, Overlay: overlay}
+	if !auth.Can(grant, auth.ActionExportAudit, auth.Target{OrgID: "o1"}) {
+		t.Fatal("overlay: teacher grant should allow export within own org")
+	}
+	if auth.Can(grant, auth.ActionExportAudit, auth.Target{OrgID: "o2"}) {
+		t.Fatal("overlay: grant must not cross organisations")
+	}
+}
+
+func TestSignedUnsubscribeTokenRoundTrip(t *testing.T) {
+	key := auth.DeriveKey("demo-secret")
+	now := time.Date(2026, 4, 10, 12, 0, 0, 0, time.UTC)
+	tok := auth.SignUnsubscribe(key, "usr-1", "booking", now)
+	if err := auth.VerifyUnsubscribe(key, "usr-1", "booking", tok, now); err != nil {
+		t.Fatalf("verify should succeed: %v", err)
+	}
+	// Forged user must fail.
+	if err := auth.VerifyUnsubscribe(key, "usr-2", "booking", tok, now); err == nil {
+		t.Fatal("verify should reject foreign user")
+	}
+	// Forged category must fail.
+	if err := auth.VerifyUnsubscribe(key, "usr-1", "marketing", tok, now); err == nil {
+		t.Fatal("verify should reject different category")
+	}
+	// Empty token must fail.
+	if err := auth.VerifyUnsubscribe(key, "usr-1", "booking", "", now); err == nil {
+		t.Fatal("verify should reject empty token")
+	}
+	// Expiry enforced.
+	future := now.Add(auth.UnsubscribeTokenTTL + time.Hour)
+	if err := auth.VerifyUnsubscribe(key, "usr-1", "booking", tok, future); err == nil {
+		t.Fatal("verify should reject expired token")
 	}
 }
