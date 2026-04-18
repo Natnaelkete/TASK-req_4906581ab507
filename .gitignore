@@ -21,8 +21,6 @@ Desktop.ini
 
 # Dependency and cache folders
 node_modules/
-.tmp/
-tmp/
 .cache/
 coverage/
 
